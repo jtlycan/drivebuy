@@ -830,9 +830,10 @@ async function fetchListings() {
     const data = await res.json();
 
     // Parse response — log full shape for debugging
+    console.log('FULL API RESPONSE:', JSON.stringify(data).slice(0, 2000));
     console.log('API response keys:', Object.keys(data));
-    const props = data?.data || data?.results || data?.properties || data?.listings || [];
-    console.log('Props count:', Array.isArray(props) ? props.length : typeof props);
+    const props = data?.data || data?.results || data?.properties || data?.listings || data?.homes || [];
+    console.log('Props found:', Array.isArray(props) ? props.length : typeof props, props?.[0] ? JSON.stringify(props[0]).slice(0,300) : 'empty');
 
     state.allFetched = (Array.isArray(props) ? props : []).map((p, i) => {
       const type = mapPropertyType(p.propertyType || p.homeType || p.property_type || p.type || '');
@@ -856,7 +857,7 @@ async function fetchListings() {
 
     state.lastFetchLat = state.lat;
     state.lastFetchLng = state.lng;
-    showToast('✅', `${state.allFetched.length} listings loaded`);
+    showToast('✅', `${state.allFetched.length} listings loaded near ${location}`);
   } catch (err) {
     console.error(err);
     // Show full error visibly on screen for debugging
