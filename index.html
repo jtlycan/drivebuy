@@ -788,26 +788,9 @@ async function fetchListings() {
   showToast('🔄', 'Fetching live listings...');
 
   try {
-    // Convert coords to zip code using zippopotam.us (CORS-safe, no key)
-    let location = '';
-    try {
-      // Use zippopotam to get zip from lat/lng via a bounding box approach
-      // Instead, use geocode.xyz which is CORS-friendly
-      const geoRes = await fetch(`https://geocode.xyz/${state.lat},${state.lng}?geoit=json&auth=`);
-      const geoData = await geoRes.json();
-      const zip = geoData?.postal || geoData?.pcode || '';
-      const city = geoData?.city || geoData?.region || '';
-      const stateAbbr = geoData?.statename || geoData?.state || '';
-      if (zip) location = zip;
-      else if (city) location = `${city}, ${stateAbbr}`;
-      console.log('Geocode result:', geoData, '-> location:', location);
-    } catch(e) { console.warn('Geocode failed:', e); }
-
-    // Final fallback: derive nearest major city from coords
-    if (!location) {
-      location = getNearestCity(state.lat, state.lng);
-      console.log('Using nearest city fallback:', location);
-    }
+    // Use nearest city lookup based on GPS coords (no external API needed)
+    const location = getNearestCity(state.lat, state.lng);
+    console.log('Location:', location);
 
     const params = new URLSearchParams({
       location,
