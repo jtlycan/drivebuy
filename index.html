@@ -746,6 +746,34 @@ function getEmoji(type) {
   return { condo:'🏢', multi:'🏘', land:'🌿', single:'🏠' }[type] || '🏠';
 }
 
+
+// ── NEAREST CITY LOOKUP (offline fallback) ──
+// Major US cities with coords — used when all geocoders fail
+const CITIES = [
+  [39.7392,-104.9903,'Denver, CO'],[39.7294,-104.8319,'Aurora, CO'],
+  [40.0150,-105.2705,'Boulder, CO'],[38.8339,-104.8214,'Colorado Springs, CO'],
+  [40.5853,-105.0844,'Fort Collins, CO'],[33.4484,-112.0740,'Phoenix, AZ'],
+  [32.7157,-117.1611,'San Diego, CA'],[34.0522,-118.2437,'Los Angeles, CA'],
+  [37.7749,-122.4194,'San Francisco, CA'],[47.6062,-122.3321,'Seattle, WA'],
+  [45.5051,-122.6750,'Portland, OR'],[36.1699,-115.1398,'Las Vegas, NV'],
+  [35.4676,-97.5164,'Oklahoma City, OK'],[29.7604,-95.3698,'Houston, TX'],
+  [30.2672,-97.7431,'Austin, TX'],[32.7767,-96.7970,'Dallas, TX'],
+  [41.8781,-87.6298,'Chicago, IL'],[42.3601,-71.0589,'Boston, MA'],
+  [40.7128,-74.0060,'New York, NY'],[25.7617,-80.1918,'Miami, FL'],
+  [33.7490,-84.3880,'Atlanta, GA'],[39.9526,-75.1652,'Philadelphia, PA'],
+  [38.9072,-77.0369,'Washington, DC'],[39.0997,-94.5786,'Kansas City, MO'],
+  [44.9778,-93.2650,'Minneapolis, MN'],[43.0481,-76.1474,'Syracuse, NY'],
+];
+
+function getNearestCity(lat, lng) {
+  let best = CITIES[0], bestDist = Infinity;
+  for (const [clat, clng, name] of CITIES) {
+    const d = getDistance(lat, lng, clat, clng);
+    if (d < bestDist) { bestDist = d; best = [clat, clng, name]; }
+  }
+  return best[2];
+}
+
 // ── LIVE API FETCH ──
 async function fetchListings() {
   if (state.fetching) return;
@@ -760,21 +788,26 @@ async function fetchListings() {
   showToast('🔄', 'Fetching live listings...');
 
   try {
-    // Reverse geocode using Photon (CORS-friendly, OSM-based)
-    let location = 'Aurora, CO'; // fallback
+    // Convert coords to zip code using zippopotam.us (CORS-safe, no key)
+    let location = '';
     try {
-      const geoRes = await fetch(`https://photon.komoot.io/reverse?lat=${state.lat}&lon=${state.lng}&limit=1`);
+      // Use zippopotam to get zip from lat/lng via a bounding box approach
+      // Instead, use geocode.xyz which is CORS-friendly
+      const geoRes = await fetch(`https://geocode.xyz/${state.lat},${state.lng}?geoit=json&auth=`);
       const geoData = await geoRes.json();
-      const props = geoData?.features?.[0]?.properties;
-      if (props) {
-        const city = props.city || props.town || props.village || props.county || '';
-        const stateCode = props.state || '';
-        const postcode = props.postcode || '';
-        if (postcode) location = postcode;
-        else if (city && stateCode) location = `${city}, ${stateCode}`;
-        console.log('Resolved location:', location, props);
-      }
-    } catch(e) { console.warn('Geocode failed, using fallback', e); }
+      const zip = geoData?.postal || geoData?.pcode || '';
+      const city = geoData?.city || geoData?.region || '';
+      const stateAbbr = geoData?.statename || geoData?.state || '';
+      if (zip) location = zip;
+      else if (city) location = `${city}, ${stateAbbr}`;
+      console.log('Geocode result:', geoData, '-> location:', location);
+    } catch(e) { console.warn('Geocode failed:', e); }
+
+    // Final fallback: derive nearest major city from coords
+    if (!location) {
+      location = getNearestCity(state.lat, state.lng);
+      console.log('Using nearest city fallback:', location);
+    }
 
     const params = new URLSearchParams({
       location,
@@ -783,7 +816,6 @@ async function fetchListings() {
       sort: 'NEWEST'
     });
 
-    // Add optional filters
     if (state.filters.priceMin > 0) params.set('price_min', state.filters.priceMin);
     if (state.filters.priceMax < Infinity) params.set('price_max', state.filters.priceMax);
     if (state.filters.sqftMin > 0) params.set('sqft_min', state.filters.sqftMin);
