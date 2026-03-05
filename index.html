@@ -241,6 +241,28 @@
   }
   #dest-input:focus { border-color: #a855f7; }
   #dest-input::placeholder { color: var(--text-muted); }
+  #autocomplete-list {
+    position: absolute;
+    bottom: 100%;
+    left: 0; right: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px 10px 0 0;
+    overflow: hidden;
+    z-index: 200;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .autocomplete-item {
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .autocomplete-item:active { background: var(--surface2); }
+  .autocomplete-item span { color: var(--text-muted); font-size: 11px; }
+  #route-bar { position: relative; }
   #route-btn {
     background: #a855f7;
     color: #fff;
@@ -616,7 +638,8 @@
 </div>
 
 <div id="route-bar">
-  <input id="dest-input" type="text" placeholder="🚗 Enter destination..." />
+  <div id="autocomplete-list"></div>
+  <input id="dest-input" type="text" placeholder="🚗 Enter destination..." autocomplete="off" />
   <button id="route-btn" onclick="handleRouteBtn()">GO</button>
   <a id="gmaps-btn" href="#" target="_blank">Maps ↗</a>
 </div>
@@ -1043,22 +1066,23 @@ async function handleRouteBtn() {
   btn.textContent = '...';
 
   try {
-    // Geocode destination via BigDataCloud (CORS-friendly)
-    const geoRes = await fetch(`https://api.bigdatacloud.net/data/geocode?q=${encodeURIComponent(dest)}&localityLanguage=en&key=`);
-    let geoData = await geoRes.json();
-    // Fallback: try forward geocoding via open-meteo geocoding (also CORS-friendly)
-    if (!geoData?.results?.length) {
-      const geoRes2 = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(dest)}&count=1&language=en&format=json`);
-      const geoData2 = await geoRes2.json();
-      if (!geoData2?.results?.length) { showToast('⚠️', 'Destination not found'); btn.textContent = 'GO'; return; }
-      state.destLat = geoData2.results[0].latitude;
-      state.destLng = geoData2.results[0].longitude;
-      state.destLabel = geoData2.results[0].name + (geoData2.results[0].admin1 ? ', ' + geoData2.results[0].admin1 : '');
-    } else {
-      state.destLat = parseFloat(geoData.results[0].latitude || geoData.results[0].lat);
-      state.destLng = parseFloat(geoData.results[0].longitude || geoData.results[0].lng);
-      state.destLabel = dest;
+    // Geocode destination via Photon (OSM-based, CORS-friendly, great for addresses)
+    // Bias results toward current location
+    const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(dest)}&limit=1&lat=${state.lat}&lon=${state.lng}`;
+    const geoRes = await fetch(photonUrl);
+    const geoData = await geoRes.json();
+    const features = geoData?.features || [];
+    if (!features.length) {
+      showToast('⚠️', 'Address not found — try adding city/state');
+      btn.textContent = 'GO';
+      return;
     }
+    const [lng, lat] = features[0].geometry.coordinates;
+    const props = features[0].properties;
+    state.destLat = lat;
+    state.destLng = lng;
+    state.destLabel = [props.name, props.street, props.city, props.state]
+      .filter(Boolean).slice(0,2).join(', ') || dest;
 
     // Fetch route from OpenRouteService (free, no key needed for basic use)
     const routeRes = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
@@ -1149,6 +1173,95 @@ function renderDestPin() {
   pin.style.top = pos.y + 'px';
   pin.innerHTML = `<div class="dest-bubble">🏁 ${state.destLabel}</div><div class="dest-tail"></div>`;
   layer.appendChild(pin);
+}
+
+
+// ── AUTOCOMPLETE ──
+let autocompleteTimer = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('dest-input');
+  input.addEventListener('input', () => {
+    clearTimeout(autocompleteTimer);
+    const val = input.value.trim();
+    if (val.length < 3) { clearAutocomplete(); return; }
+    autocompleteTimer = setTimeout(() => fetchSuggestions(val), 350);
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { clearAutocomplete(); handleRouteBtn(); }
+  });
+  // Hide on outside click
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#route-bar')) clearAutocomplete();
+  });
+});
+
+async function fetchSuggestions(query) {
+  try {
+    const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lat=${state.lat}&lon=${state.lng}`);
+    const data = await res.json();
+    const features = data?.features || [];
+    renderAutocomplete(features);
+  } catch(e) { clearAutocomplete(); }
+}
+
+function renderAutocomplete(features) {
+  const list = document.getElementById('autocomplete-list');
+  if (!features.length) { list.innerHTML = ''; return; }
+  list.innerHTML = features.map((f, i) => {
+    const p = f.properties;
+    const main = p.name || p.street || p.city || '';
+    const sub = [p.street, p.city, p.state].filter(Boolean).join(', ');
+    return `<div class="autocomplete-item" onclick="selectSuggestion(${i})">
+      ${main}<br><span>${sub}</span>
+    </div>`;
+  }).join('');
+  list._features = features;
+}
+
+function selectSuggestion(i) {
+  const list = document.getElementById('autocomplete-list');
+  const f = list._features[i];
+  const p = f.properties;
+  const label = [p.name || p.street, p.city, p.state].filter(Boolean).join(', ');
+  document.getElementById('dest-input').value = label;
+  const [lng, lat] = f.geometry.coordinates;
+  state.destLat = lat;
+  state.destLng = lng;
+  state.destLabel = label;
+  clearAutocomplete();
+  // Trigger route with pre-set coordinates
+  triggerRouteFromCoords();
+}
+
+function clearAutocomplete() {
+  document.getElementById('autocomplete-list').innerHTML = '';
+}
+
+async function triggerRouteFromCoords() {
+  const btn = document.getElementById('route-btn');
+  btn.textContent = '...';
+  try {
+    const routeRes = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': '5b3ce3597851110001cf6248a5f6e6b749f14c4e86c3b7e7b1e0c8b5' },
+      body: JSON.stringify({ coordinates: [[state.lng, state.lat],[state.destLng, state.destLat]] })
+    });
+    const routeData = await routeRes.json();
+    const coords = routeData?.features?.[0]?.geometry?.coordinates;
+    if (!coords) throw new Error('No route found');
+    state.route = coords;
+    btn.textContent = 'CLEAR';
+    btn.classList.add('clear');
+    const gmBtn = document.getElementById('gmaps-btn');
+    gmBtn.href = `https://www.google.com/maps/dir/?api=1&origin=${state.lat},${state.lng}&destination=${state.destLat},${state.destLng}&travelmode=driving`;
+    gmBtn.classList.add('visible');
+    renderPins(); renderCards(); drawRoute(); renderDestPin();
+    showToast('🚗', `Route set to ${state.destLabel}`);
+  } catch(e) {
+    showToast('⚠️', 'Could not get route');
+    btn.textContent = 'GO';
+  }
 }
 
 // ── FILTERS ──
