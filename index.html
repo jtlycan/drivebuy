@@ -821,13 +821,7 @@ async function fetchListings() {
     if (state.filters.sqftMin > 0) params.set('sqft_min', state.filters.sqftMin);
     if (state.filters.sqftMax < Infinity) params.set('sqft_max', state.filters.sqftMax);
 
-    const res = await fetch(`https://real-time-real-estate-data.p.rapidapi.com/search?${params}`, {
-      method: 'GET',
-      headers: {
-        'x-rapidapi-key': RAPIDAPI_KEY,
-        'x-rapidapi-host': 'real-time-real-estate-data.p.rapidapi.com'
-      }
-    });
+    const res = await fetch(`https://drivebuy-proxy.jtlycan.workers.dev/search?${params}`);
 
     if (!res.ok) {
       const errText = await res.text();
