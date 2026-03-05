@@ -637,9 +637,21 @@ async function fetchListings() {
   showToast('🔄', 'Fetching live listings...');
 
   try {
-    // Build location string from current coords
+    // Reverse geocode coords to city, state string using free API
+    let location = 'Aurora, CO'; // fallback
+    try {
+      const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${state.lat}&lon=${state.lng}&format=json`);
+      const geoData = await geoRes.json();
+      const city = geoData?.address?.city || geoData?.address?.town || geoData?.address?.village || geoData?.address?.county || '';
+      const stateCode = geoData?.address?.['ISO3166-2-lvl4']?.split('-')[1] || geoData?.address?.state || '';
+      const zip = geoData?.address?.postcode || '';
+      if (zip) location = zip;
+      else if (city && stateCode) location = `${city}, ${stateCode}`;
+      console.log('Resolved location:', location);
+    } catch(e) { console.warn('Geocode failed, using fallback', e); }
+
     const params = new URLSearchParams({
-      location: `${state.lat.toFixed(5)},${state.lng.toFixed(5)}`,
+      location,
       home_status: 'FOR_SALE',
       listing_type: 'BY_AGENT',
       sort: 'NEWEST'
