@@ -182,6 +182,95 @@
   }
   .pin.new .pin-tail { border-top-color: var(--accent); }
   .pin.selected .pin-tail { border-top-color: var(--accent2); }
+  /* ── ROUTE ── */
+  #route-canvas {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .dest-pin {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    z-index: 6;
+    pointer-events: none;
+  }
+  .dest-bubble {
+    background: #1a0a2e;
+    border: 2px solid #a855f7;
+    border-radius: 10px 10px 10px 2px;
+    padding: 5px 9px;
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    color: #a855f7;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px #00000088;
+  }
+  .dest-tail {
+    width: 0; height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 7px solid #a855f7;
+    margin-left: 4px;
+  }
+  .pin.en-route .pin-bubble {
+    border-color: #a855f7;
+    background: #1a0a2e;
+    color: #a855f7;
+  }
+  .pin.en-route .pin-tail { border-top-color: #a855f7; }
+
+  /* ── ROUTE INPUT ── */
+  #route-bar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #dest-input {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 9px 13px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    outline: none;
+  }
+  #dest-input:focus { border-color: #a855f7; }
+  #dest-input::placeholder { color: var(--text-muted); }
+  #route-btn {
+    background: #a855f7;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 9px 14px;
+    font-size: 12px;
+    font-family: 'DM Mono', monospace;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+  }
+  #route-btn:active { opacity: 0.8; }
+  #route-btn.clear { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); }
+  #gmaps-btn {
+    display: none;
+    background: #1a6634;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 9px 14px;
+    font-size: 12px;
+    font-family: 'DM Mono', monospace;
+    cursor: pointer;
+    white-space: nowrap;
+    text-decoration: none;
+    align-items: center;
+  }
+  #gmaps-btn.visible { display: flex; }
+
 
   /* ── FILTER BAR ── */
   #filter-strip {
@@ -512,7 +601,9 @@
   <div class="map-road road-v" style="left:78%"></div>
   <div id="radius-ring"></div>
   <div id="beacon" style="left:50%;top:50%;display:none;"></div>
+  <canvas id="route-canvas"></canvas>
   <div id="pins-layer"></div>
+  <div id="dest-layer"></div>
 </div>
 
 <div id="filter-strip">
@@ -524,6 +615,11 @@
   <div class="filter-chip" id="chip-type">🏠 All types</div>
 </div>
 
+<div id="route-bar">
+  <input id="dest-input" type="text" placeholder="🚗 Enter destination..." />
+  <button id="route-btn" onclick="handleRouteBtn()">GO</button>
+  <a id="gmaps-btn" href="#" target="_blank">Maps ↗</a>
+</div>
 <div id="bottom-panel">
   <div class="panel-header">
     <div class="panel-title">Nearby Listings</div>
@@ -604,7 +700,11 @@ const state = {
   selectedId: null,
   lastFetchLat: null,
   lastFetchLng: null,
-  fetching: false
+  fetching: false,
+  route: null,        // array of [lng,lat] coords
+  destLat: null,
+  destLng: null,
+  destLabel: ''
 };
 
 const RAPIDAPI_KEY = '35fff46c9bmshf86bcb9af6ff82bp157c4ajsn5d0d6217e015';
@@ -816,6 +916,7 @@ function updateMap() {
 
   renderPins();
   renderCards();
+  if (state.route) { drawRoute(); renderDestPin(); }
 }
 
 function getDistance(lat1, lng1, lat2, lng2) {
@@ -848,7 +949,8 @@ function renderPins() {
     const pos = latLngToXY(l.lat, l.lng);
     if (pos.x < -20 || pos.x > w+20 || pos.y < -20 || pos.y > h+20) return;
     const pin = document.createElement('div');
-    pin.className = 'pin' + (l.id === state.selectedId ? ' selected' : '') + (l.dom <= 3 ? ' new' : '');
+    const onRoute = isNearRoute(l.lat, l.lng);
+    pin.className = 'pin' + (l.id === state.selectedId ? ' selected' : '') + (l.dom <= 3 && !onRoute ? ' new' : '') + (onRoute ? ' en-route' : '');
     pin.style.left = pos.x + 'px';
     pin.style.top = pos.y + 'px';
     pin.innerHTML = `<div class="pin-bubble">$${(l.price/1000).toFixed(0)}k</div><div class="pin-tail"></div>`;
@@ -881,11 +983,12 @@ function renderCards() {
       `${(dist*5280/1000).toFixed(1)}k ft`,
     ];
     const specialTags = [];
+    if (isNearRoute(l.lat, l.lng)) specialTags.push(`<span class="tag" style="border-color:#a855f7;color:#a855f7">🚗 EN ROUTE</span>`);
     if (l.dom <= 3) specialTags.push(`<span class="tag new-tag">NEW ${l.dom===0?'TODAY':l.dom+'d ago'}</span>`);
     else if (l.dom > 60) specialTags.push(`<span class="tag hot">⏱ ${l.dom}d on market</span>`);
     else specialTags.push(`<span class="tag">${l.dom}d on market</span>`);
 
-    const navUrl = `https://maps.apple.com/?daddr=${l.lat},${l.lng}&dirflg=d`;
+    const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${l.lat},${l.lng}&travelmode=driving`;
 
     return `<div class="listing-card${l.id===state.selectedId?' selected':''}" onclick="selectListing(${l.id})">
       <div class="listing-thumb">${l.emoji}</div>
@@ -910,6 +1013,134 @@ function selectListing(id) {
     const card = document.querySelector('.listing-card.selected');
     if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
+}
+
+
+// ── ROUTE ──
+async function handleRouteBtn() {
+  const input = document.getElementById('dest-input');
+  const btn = document.getElementById('route-btn');
+
+  if (state.route) {
+    // Clear route
+    state.route = null;
+    state.destLat = null;
+    state.destLng = null;
+    state.destLabel = '';
+    input.value = '';
+    btn.textContent = 'GO';
+    btn.classList.remove('clear');
+    document.getElementById('gmaps-btn').classList.remove('visible');
+    document.getElementById('dest-layer').innerHTML = '';
+    clearRouteCanvas();
+    renderPins();
+    renderCards();
+    return;
+  }
+
+  const dest = input.value.trim();
+  if (!dest) return;
+  btn.textContent = '...';
+
+  try {
+    // Geocode destination via Nominatim
+    const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest)}&format=json&limit=1`);
+    const geoData = await geoRes.json();
+    if (!geoData.length) { showToast('⚠️', 'Destination not found'); btn.textContent = 'GO'; return; }
+
+    state.destLat = parseFloat(geoData[0].lat);
+    state.destLng = parseFloat(geoData[0].lon);
+    state.destLabel = geoData[0].display_name.split(',').slice(0,2).join(',');
+
+    // Fetch route from OpenRouteService (free, no key needed for basic use)
+    const routeRes = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': '5b3ce3597851110001cf6248a5f6e6b749f14c4e86c3b7e7b1e0c8b5' },
+      body: JSON.stringify({ coordinates: [[state.lng, state.lat],[state.destLng, state.destLat]] })
+    });
+    const routeData = await routeRes.json();
+    const coords = routeData?.features?.[0]?.geometry?.coordinates;
+    if (!coords) throw new Error('No route found');
+
+    state.route = coords; // array of [lng, lat]
+
+    // Update UI
+    btn.textContent = 'CLEAR';
+    btn.classList.add('clear');
+
+    // Google Maps link
+    const gmBtn = document.getElementById('gmaps-btn');
+    gmBtn.href = `https://www.google.com/maps/dir/?api=1&origin=${state.lat},${state.lng}&destination=${encodeURIComponent(dest)}&travelmode=driving`;
+    gmBtn.classList.add('visible');
+
+    renderPins();
+    renderCards();
+    drawRoute();
+    renderDestPin();
+    showToast('🚗', `Route set to ${state.destLabel}`);
+
+  } catch(e) {
+    showToast('⚠️', 'Could not get route');
+    btn.textContent = 'GO';
+    console.error(e);
+  }
+}
+
+function isNearRoute(lat, lng) {
+  if (!state.route) return false;
+  const thresholdMi = 0.25;
+  for (const [rLng, rLat] of state.route) {
+    if (getDistance(lat, lng, rLat, rLng) < thresholdMi) return true;
+  }
+  return false;
+}
+
+function clearRouteCanvas() {
+  const canvas = document.getElementById('route-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawRoute() {
+  if (!state.route) return;
+  const mapEl = document.getElementById('map-area');
+  const canvas = document.getElementById('route-canvas');
+  canvas.width = mapEl.offsetWidth;
+  canvas.height = mapEl.offsetHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.beginPath();
+  ctx.strokeStyle = '#a855f7';
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.globalAlpha = 0.75;
+  // Glow effect
+  ctx.shadowColor = '#a855f7';
+  ctx.shadowBlur = 8;
+
+  state.route.forEach(([rLng, rLat], i) => {
+    const pos = latLngToXY(rLat, rLng);
+    if (i === 0) ctx.moveTo(pos.x, pos.y);
+    else ctx.lineTo(pos.x, pos.y);
+  });
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+}
+
+function renderDestPin() {
+  const layer = document.getElementById('dest-layer');
+  layer.innerHTML = '';
+  if (!state.destLat) return;
+  const pos = latLngToXY(state.destLat, state.destLng);
+  const pin = document.createElement('div');
+  pin.className = 'dest-pin';
+  pin.style.left = pos.x + 'px';
+  pin.style.top = pos.y + 'px';
+  pin.innerHTML = `<div class="dest-bubble">🏁 ${state.destLabel}</div><div class="dest-tail"></div>`;
+  layer.appendChild(pin);
 }
 
 // ── FILTERS ──
