@@ -695,7 +695,9 @@ async function fetchListings() {
     showToast('✅', `${state.allFetched.length} listings loaded`);
   } catch (err) {
     console.error(err);
-    showToast('⚠️', 'API error — check console');
+    // Show full error visibly on screen for debugging
+    const msg = err.message || String(err);
+    showDebugError(msg);
   }
 
   state.fetching = false;
@@ -935,6 +937,25 @@ function applyFilters() {
 
   closeFilters();
   if (state.tracking) { fetchListings().then(() => updateMap()); }
+}
+
+// ── DEBUG ERROR DISPLAY ──
+function showDebugError(msg) {
+  // Remove any existing debug box
+  const existing = document.getElementById('debug-box');
+  if (existing) existing.remove();
+
+  const box = document.createElement('div');
+  box.id = 'debug-box';
+  box.style.cssText = `
+    position:fixed; top:60px; left:10px; right:10px; z-index:999;
+    background:#1a0000; border:2px solid #ff4757; border-radius:12px;
+    padding:14px; font-family:monospace; font-size:12px; color:#ff4757;
+    max-height:50vh; overflow-y:auto; word-break:break-all;
+  `;
+  box.innerHTML = `<strong>⚠️ API Error — tap to dismiss</strong><br><br>${msg}`;
+  box.onclick = () => box.remove();
+  document.body.appendChild(box);
 }
 
 // ── TOAST ──
