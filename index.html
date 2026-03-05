@@ -760,17 +760,20 @@ async function fetchListings() {
   showToast('🔄', 'Fetching live listings...');
 
   try {
-    // Reverse geocode using BigDataCloud (CORS-friendly, no key, browser-native)
+    // Reverse geocode using Photon (CORS-friendly, OSM-based)
     let location = 'Aurora, CO'; // fallback
     try {
-      const geoRes = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${state.lat}&longitude=${state.lng}&localityLanguage=en`);
+      const geoRes = await fetch(`https://photon.komoot.io/reverse?lat=${state.lat}&lon=${state.lng}&limit=1`);
       const geoData = await geoRes.json();
-      const city = geoData?.city || geoData?.locality || geoData?.principalSubdivision || '';
-      const zip = geoData?.postcode || '';
-      const stateCode = geoData?.principalSubdivisionCode?.replace('US-','') || '';
-      if (zip) location = zip;
-      else if (city && stateCode) location = `${city}, ${stateCode}`;
-      console.log('Resolved location:', location, geoData);
+      const props = geoData?.features?.[0]?.properties;
+      if (props) {
+        const city = props.city || props.town || props.village || props.county || '';
+        const stateCode = props.state || '';
+        const postcode = props.postcode || '';
+        if (postcode) location = postcode;
+        else if (city && stateCode) location = `${city}, ${stateCode}`;
+        console.log('Resolved location:', location, props);
+      }
     } catch(e) { console.warn('Geocode failed, using fallback', e); }
 
     const params = new URLSearchParams({
