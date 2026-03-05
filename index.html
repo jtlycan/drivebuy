@@ -737,17 +737,17 @@ async function fetchListings() {
   showToast('🔄', 'Fetching live listings...');
 
   try {
-    // Reverse geocode coords to city, state string using free API
+    // Reverse geocode using BigDataCloud (CORS-friendly, no key, browser-native)
     let location = 'Aurora, CO'; // fallback
     try {
-      const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${state.lat}&lon=${state.lng}&format=json`);
+      const geoRes = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${state.lat}&longitude=${state.lng}&localityLanguage=en`);
       const geoData = await geoRes.json();
-      const city = geoData?.address?.city || geoData?.address?.town || geoData?.address?.village || geoData?.address?.county || '';
-      const stateCode = geoData?.address?.['ISO3166-2-lvl4']?.split('-')[1] || geoData?.address?.state || '';
-      const zip = geoData?.address?.postcode || '';
+      const city = geoData?.city || geoData?.locality || geoData?.principalSubdivision || '';
+      const zip = geoData?.postcode || '';
+      const stateCode = geoData?.principalSubdivisionCode?.replace('US-','') || '';
       if (zip) location = zip;
       else if (city && stateCode) location = `${city}, ${stateCode}`;
-      console.log('Resolved location:', location);
+      console.log('Resolved location:', location, geoData);
     } catch(e) { console.warn('Geocode failed, using fallback', e); }
 
     const params = new URLSearchParams({
@@ -1043,14 +1043,22 @@ async function handleRouteBtn() {
   btn.textContent = '...';
 
   try {
-    // Geocode destination via Nominatim
-    const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(dest)}&format=json&limit=1`);
-    const geoData = await geoRes.json();
-    if (!geoData.length) { showToast('⚠️', 'Destination not found'); btn.textContent = 'GO'; return; }
-
-    state.destLat = parseFloat(geoData[0].lat);
-    state.destLng = parseFloat(geoData[0].lon);
-    state.destLabel = geoData[0].display_name.split(',').slice(0,2).join(',');
+    // Geocode destination via BigDataCloud (CORS-friendly)
+    const geoRes = await fetch(`https://api.bigdatacloud.net/data/geocode?q=${encodeURIComponent(dest)}&localityLanguage=en&key=`);
+    let geoData = await geoRes.json();
+    // Fallback: try forward geocoding via open-meteo geocoding (also CORS-friendly)
+    if (!geoData?.results?.length) {
+      const geoRes2 = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(dest)}&count=1&language=en&format=json`);
+      const geoData2 = await geoRes2.json();
+      if (!geoData2?.results?.length) { showToast('⚠️', 'Destination not found'); btn.textContent = 'GO'; return; }
+      state.destLat = geoData2.results[0].latitude;
+      state.destLng = geoData2.results[0].longitude;
+      state.destLabel = geoData2.results[0].name + (geoData2.results[0].admin1 ? ', ' + geoData2.results[0].admin1 : '');
+    } else {
+      state.destLat = parseFloat(geoData.results[0].latitude || geoData.results[0].lat);
+      state.destLng = parseFloat(geoData.results[0].longitude || geoData.results[0].lng);
+      state.destLabel = dest;
+    }
 
     // Fetch route from OpenRouteService (free, no key needed for basic use)
     const routeRes = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
