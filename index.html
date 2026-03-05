@@ -637,23 +637,21 @@ async function fetchListings() {
   showToast('🔄', 'Fetching live listings...');
 
   try {
-    // Use Zillow search-by-coordinates endpoint
-    const radiusDeg = state.radius / 69;
+    // Build location string from current coords
     const params = new URLSearchParams({
-      location: `${state.lat},${state.lng}`,
-      home_type: 'Houses,Condos,Apartments,Townhomes,Multi-family',
-      status_type: 'ForSale',
-      price_min: state.filters.priceMin > 0 ? state.filters.priceMin : '',
-      price_max: state.filters.priceMax < Infinity ? state.filters.priceMax : '',
-      sqft_min: state.filters.sqftMin > 0 ? state.filters.sqftMin : '',
-      sqft_max: state.filters.sqftMax < Infinity ? state.filters.sqftMax : '',
-      sort: 'Days',
-      page: '1'
+      location: `${state.lat.toFixed(5)},${state.lng.toFixed(5)}`,
+      home_status: 'FOR_SALE',
+      listing_type: 'BY_AGENT',
+      sort: 'NEWEST'
     });
-    // Remove empty params
-    for (const [k, v] of [...params.entries()]) { if (v === '') params.delete(k); }
 
-    const res = await fetch(`https://real-time-real-estate-data.p.rapidapi.com/search-properties?${params}`, {
+    // Add optional filters
+    if (state.filters.priceMin > 0) params.set('price_min', state.filters.priceMin);
+    if (state.filters.priceMax < Infinity) params.set('price_max', state.filters.priceMax);
+    if (state.filters.sqftMin > 0) params.set('sqft_min', state.filters.sqftMin);
+    if (state.filters.sqftMax < Infinity) params.set('sqft_max', state.filters.sqftMax);
+
+    const res = await fetch(`https://real-time-real-estate-data.p.rapidapi.com/search?${params}`, {
       method: 'GET',
       headers: {
         'x-rapidapi-key': RAPIDAPI_KEY,
@@ -667,25 +665,28 @@ async function fetchListings() {
     }
     const data = await res.json();
 
-    // Handle various response shapes
-    const props = data?.props || data?.data?.props || data?.results || data?.data || [];
-    state.allFetched = props.map((p, i) => {
-      const type = mapPropertyType(p.propertyType || p.homeType || p.property_type || '');
-      const addr = p.address || p.streetAddress ||
-        [p.streetAddress, p.city, p.state].filter(Boolean).join(', ') || 'Address unavailable';
+    // Parse response — log full shape for debugging
+    console.log('API response keys:', Object.keys(data));
+    const props = data?.data || data?.results || data?.properties || data?.listings || [];
+    console.log('Props count:', Array.isArray(props) ? props.length : typeof props);
+
+    state.allFetched = (Array.isArray(props) ? props : []).map((p, i) => {
+      const type = mapPropertyType(p.propertyType || p.homeType || p.property_type || p.type || '');
+      const addr = p.address || p.streetAddress || p.full_address ||
+        [p.street, p.city, p.state].filter(Boolean).join(', ') || 'Address unavailable';
       return {
         id: p.zpid || p.property_id || p.id || i,
         lat: parseFloat(p.latitude || p.lat || 0),
         lng: parseFloat(p.longitude || p.lng || p.lon || 0),
         price: parseInt(p.price || p.listPrice || p.list_price || 0),
         addr,
-        sqft: parseInt(p.livingArea || p.sqft || p.living_area || 0),
+        sqft: parseInt(p.livingArea || p.sqft || p.living_area || p.building_size || 0),
         beds: parseInt(p.bedrooms || p.beds || 0),
         baths: parseFloat(p.bathrooms || p.baths || 0),
         type,
-        dom: parseInt(p.daysOnMarket || p.days_on_market || 0),
+        dom: parseInt(p.daysOnMarket || p.days_on_market || p.dom || 0),
         emoji: getEmoji(type),
-        url: p.detailUrl || p.url || null
+        url: p.detailUrl || p.propertyUrl || p.url || null
       };
     }).filter(p => p.lat && p.lng && p.price > 0);
 
