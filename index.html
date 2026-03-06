@@ -6,3 +6,537 @@
 <title>DriveBuy</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#0a0a0a;--surface:#141414;--surface2:#1e1e1e;--border:#2a2a2a;
+  --accent:#00ff87;--accent2:#00c4ff;--warn:#ff6b35;--text:#f0f0f0;--muted:#666;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif}
+#app{display:flex;flex-direction:column;height:100vh}
+
+#header{padding:12px 16px 8px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px;flex-shrink:0;z-index:20}
+#brand{display:flex;align-items:center;justify-content:space-between}
+#brand h1{font-family:'Syne',sans-serif;font-size:22px;font-weight:800;letter-spacing:-0.5px}
+#brand h1 span{color:var(--accent)}
+#status-row{display:flex;align-items:center;gap:8px;font-size:11px;font-family:'DM Mono',monospace}
+.status-dot{width:6px;height:6px;border-radius:50%;background:var(--muted)}
+.status-dot.live{background:var(--accent);box-shadow:0 0 6px var(--accent);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+#speed-display{margin-left:auto;font-family:'DM Mono',monospace;font-size:11px;color:var(--accent2)}
+
+#nav-bar{display:flex;flex-direction:column;gap:6px;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+#nav-input-row{display:flex;gap:8px;align-items:center}
+#dest-wrap{position:relative;flex:1}
+#dest-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;outline:none;transition:border-color 0.2s}
+#dest-input:focus{border-color:var(--accent2)}
+#dest-input::placeholder{color:var(--muted)}
+#nav-btn{background:var(--accent2);color:#000;border:none;border-radius:8px;padding:9px 14px;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity 0.2s}
+#nav-btn:hover{opacity:0.85}
+#nav-btn.active{background:var(--warn)}
+#route-info{display:none;font-family:'DM Mono',monospace;font-size:11px;color:var(--accent2);padding:4px 0}
+#route-info.show{display:flex;gap:16px;align-items:center}
+#cancel-route{margin-left:auto;background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;color:var(--muted);font-size:11px;cursor:pointer}
+#cancel-route:hover{border-color:var(--warn);color:var(--warn)}
+#turn-panel{display:none;background:rgba(0,196,255,0.08);border-radius:8px;padding:8px 12px;flex-direction:column;gap:3px}
+#turn-panel.show{display:flex}
+#turn-instruction{font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500}
+#turn-dist{font-family:'DM Mono',monospace;font-size:11px;color:var(--accent2)}
+#autocomplete{position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;z-index:200;max-height:180px;overflow-y:auto}
+#autocomplete .sug{padding:10px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border)}
+#autocomplete .sug:hover{background:var(--surface2)}
+#autocomplete .sug:last-child{border-bottom:none}
+
+#controls{display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--bg);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto}
+#controls::-webkit-scrollbar{display:none}
+.chip{background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:5px 12px;font-size:12px;font-family:'DM Mono',monospace;white-space:nowrap;cursor:pointer;transition:all 0.15s;flex-shrink:0}
+.chip:hover,.chip.active{background:var(--accent);color:#000;border-color:var(--accent)}
+#radius-wrap{display:flex;align-items:center;gap:6px;margin-left:auto;flex-shrink:0}
+#radius-val{font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);min-width:40px;text-align:right}
+input[type=range]{-webkit-appearance:none;appearance:none;width:90px;height:3px;background:var(--border);border-radius:2px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);cursor:pointer}
+
+#map-wrap{flex:1;position:relative;min-height:0}
+#map{width:100%;height:100%}
+.leaflet-container{background:#111}
+.price-pin{background:var(--accent);color:#000;border:2px solid #000;border-radius:6px;padding:2px 6px;font-family:'DM Mono',monospace;font-size:10px;font-weight:500;white-space:nowrap;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.5);transition:transform 0.15s}
+.price-pin:hover{transform:scale(1.1)}
+.price-pin.selected{background:#fff;border-color:var(--accent);transform:scale(1.15)}
+.price-pin.new-today{background:#ff6b35;color:#fff}
+#gps-btn{position:absolute;bottom:16px;right:16px;z-index:1000;background:var(--accent);color:#000;border:none;border-radius:50%;width:48px;height:48px;font-size:20px;cursor:pointer;box-shadow:0 4px 16px rgba(0,255,135,0.3);transition:all 0.2s;display:flex;align-items:center;justify-content:center}
+#gps-btn.active{background:var(--accent2);box-shadow:0 4px 16px rgba(0,196,255,0.4)}
+#recenter-btn{position:absolute;bottom:76px;right:16px;z-index:1000;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:50%;width:40px;height:40px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+
+#tray{height:140px;background:var(--bg);border-top:1px solid var(--border);overflow-x:auto;overflow-y:hidden;display:flex;gap:10px;padding:10px 16px;flex-shrink:0;scroll-snap-type:x mandatory}
+#tray::-webkit-scrollbar{display:none}
+.card{min-width:220px;max-width:220px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;flex-shrink:0;cursor:pointer;scroll-snap-align:start;transition:all 0.2s;display:flex;flex-direction:column;gap:6px}
+.card:hover,.card.selected{border-color:var(--accent);box-shadow:0 0 12px rgba(0,255,135,0.1)}
+.card-price{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:var(--accent)}
+.card-addr{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-meta{display:flex;gap:8px;font-size:11px;font-family:'DM Mono',monospace;color:var(--text)}
+.card-footer{display:flex;justify-content:space-between;align-items:center;margin-top:auto;gap:6px}
+.card-badge{font-size:9px;font-family:'DM Mono',monospace;padding:2px 6px;border-radius:4px;background:var(--surface2)}
+.card-badge.new{background:var(--warn);color:#fff}
+.card-dist{font-size:10px;font-family:'DM Mono',monospace;color:var(--accent2)}
+.card-nav-btn{background:var(--accent2);color:#000;border:none;border-radius:6px;padding:4px 8px;font-size:10px;font-family:'DM Mono',monospace;cursor:pointer;font-weight:700;white-space:nowrap}
+.card-nav-btn:hover{opacity:0.8}
+#empty-state{display:none;flex:1;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--muted);font-family:'DM Mono',monospace;font-size:12px}
+#empty-state.show{display:flex}
+#count-pill{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);padding:3px 8px;background:var(--surface2);border-radius:10px;white-space:nowrap;flex-shrink:0}
+
+#loading{display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2000;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px 28px;text-align:center;font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);gap:10px;flex-direction:column;align-items:center}
+#loading.show{display:flex}
+.spinner{width:24px;height:24px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+#toast{position:fixed;bottom:170px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 16px;font-family:'DM Mono',monospace;font-size:11px;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:3000;max-width:280px;text-align:center}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <div id="brand">
+      <h1>Drive<span>Buy</span></h1>
+      <div id="count-pill">0 nearby</div>
+    </div>
+    <div id="status-row">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">Tap GPS to start</span>
+      <span id="speed-display"></span>
+    </div>
+  </div>
+
+  <div id="nav-bar">
+    <div id="nav-input-row">
+      <div id="dest-wrap">
+        <input id="dest-input" type="text" placeholder="Navigate to address..." autocomplete="off"/>
+        <div id="autocomplete" style="display:none"></div>
+      </div>
+      <button id="nav-btn" onclick="startNavigation()">GO</button>
+    </div>
+    <div id="route-info">
+      <span id="route-dist">—</span>
+      <span id="route-eta">—</span>
+      <button id="cancel-route" onclick="cancelNavigation()">✕ Cancel</button>
+    </div>
+    <div id="turn-panel">
+      <div id="turn-instruction">—</div>
+      <div id="turn-dist">—</div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button class="chip" id="gps-ctrl-btn" onclick="toggleGPS()">📍 Start GPS</button>
+    <button class="chip" id="chip-all" onclick="filterType('all')" style="display:none">All</button>
+    <button class="chip" id="chip-sfr" onclick="filterType('sfr')" style="display:none">🏠 Houses</button>
+    <button class="chip" id="chip-condo" onclick="filterType('condo')" style="display:none">🏢 Condos</button>
+    <button class="chip" id="chip-sort" onclick="toggleSort()" style="display:none">Sort: Dist</button>
+    <div id="radius-wrap" style="display:none">
+      <span style="font-size:11px;color:var(--muted)">r</span>
+      <input type="range" id="radius-slider" min="1" max="25" step="1" value="10" oninput="updateRadius(this.value)">
+      <span id="radius-val">10mi</span>
+    </div>
+  </div>
+
+  <div id="map-wrap">
+    <div id="map"></div>
+    <button id="gps-btn" onclick="toggleGPS()">📍</button>
+    <button id="recenter-btn" onclick="recenterMap()" title="Re-center">⊕</button>
+    <div id="loading"><div class="spinner"></div><span>Fetching listings…</span></div>
+  </div>
+
+  <div id="tray">
+    <div id="empty-state" class="show">
+      <span style="font-size:24px">🏠</span>
+      <span>Start GPS to see nearby homes</span>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const PROXY = 'https://drivebuy-proxy.jtlycan.workers.dev';
+const ORS_KEY = '5b3ce3597851110001cf6248a5f6e6b749f14c4e86c3b7e7b1e0c8b5';
+const NOMINATIM = 'https://nominatim.openstreetmap.org';
+
+const state = {
+  gpsActive:false, watchId:null, userLat:null, userLng:null, userSpeed:null,
+  allFetched:[], filtered:[], filterType:'all', sortBy:'dist', radius:10,
+  lastFetchLat:null, lastFetchLng:null, selectedId:null,
+  destLat:null, destLng:null, destLabel:'', route:null, routeLayer:null,
+  routeSteps:[], currentStepIdx:0, navActive:false,
+};
+
+// MAP INIT
+const map = L.map('map',{zoomControl:false,attributionControl:false}).setView([39.73,-104.83],12);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19}).addTo(map);
+let userMarker=null, destMarker=null;
+const listingMarkers={};
+
+// GPS
+function toggleGPS(){state.gpsActive?stopGPS():startGPS()}
+
+function startGPS(){
+  if(!navigator.geolocation){toast('Geolocation not supported');return}
+  state.gpsActive=true;
+  document.getElementById('gps-btn').textContent='🔵';
+  document.getElementById('gps-btn').classList.add('active');
+  document.getElementById('gps-ctrl-btn').textContent='⏹ Stop GPS';
+  document.getElementById('status-dot').classList.add('live');
+  setStatus('Acquiring GPS…');
+  state.watchId=navigator.geolocation.watchPosition(onPosition,
+    err=>{toast('GPS: '+err.message);stopGPS()},
+    {enableHighAccuracy:true,maximumAge:3000,timeout:10000});
+}
+
+function stopGPS(){
+  if(state.watchId!=null)navigator.geolocation.clearWatch(state.watchId);
+  state.gpsActive=false;state.watchId=null;
+  document.getElementById('gps-btn').textContent='📍';
+  document.getElementById('gps-btn').classList.remove('active');
+  document.getElementById('gps-ctrl-btn').textContent='📍 Start GPS';
+  document.getElementById('status-dot').classList.remove('live');
+  setStatus('GPS stopped');
+  document.getElementById('speed-display').textContent='';
+}
+
+function onPosition(pos){
+  const{latitude:lat,longitude:lng,speed}=pos.coords;
+  state.userLat=lat;state.userLng=lng;state.userSpeed=speed;
+  if(speed!=null){
+    const mph=(speed*2.237).toFixed(0);
+    document.getElementById('speed-display').textContent=mph+' mph';
+  }
+  if(!userMarker){
+    userMarker=L.circleMarker([lat,lng],{radius:8,color:'#00ff87',fillColor:'#00ff87',fillOpacity:0.9,weight:2}).addTo(map);
+    map.setView([lat,lng],14);
+    ['chip-all','chip-sfr','chip-condo','chip-sort'].forEach(id=>document.getElementById(id).style.display='');
+    document.getElementById('radius-wrap').style.display='';
+  } else {
+    userMarker.setLatLng([lat,lng]);
+  }
+  if(state.navActive){
+    map.setView([lat,lng],map.getZoom());
+    updateNavProgress(lat,lng);
+  }
+  const moved=state.lastFetchLat!=null?distMi(lat,lng,state.lastFetchLat,state.lastFetchLng):999;
+  if(moved>0.3)fetchListings(lat,lng);
+}
+
+// LISTINGS
+async function fetchListings(lat,lng){
+  setStatus('Fetching listings…');
+  document.getElementById('loading').classList.add('show');
+  state.lastFetchLat=lat;state.lastFetchLng=lng;
+  try{
+    const url=`${PROXY}?location=${lat},${lng}&radius=${state.radius}&listing_type=for_sale&status=for_sale`;
+    const res=await fetch(url);
+    const data=await res.json();
+    const props=data?.data?.results||data?.data?.home_search?.results||data?.props||[];
+    state.allFetched=(Array.isArray(props)?props:[]).map((p,i)=>{
+      const type=mapPropType(p.homeType||p.propertyType||'');
+      const addr=[p.streetAddress,p.city,p.state].filter(Boolean).join(', ')||p.address||'Unknown';
+      return{
+        id:p.zpid||p.property_id||i,
+        lat:parseFloat(p.latitude||0),lng:parseFloat(p.longitude||0),
+        price:parseInt(p.price||0),addr,sqft:parseInt(p.livingArea||0),
+        beds:parseInt(p.bedrooms||0),baths:parseFloat(p.bathrooms||0),
+        type,dom:parseInt(p.daysOnZillow||p.daysOnMarket||0),
+        emoji:getEmoji(type),url:p.detailUrl||p.hdpUrl||null
+      };
+    }).filter(p=>p.lat&&p.lng&&p.price>0);
+    applyFilters();
+    setStatus(state.allFetched.length+' listings found');
+    toast(state.allFetched.length+' homes within '+state.radius+'mi');
+  }catch(e){console.error(e);setStatus('Fetch failed');toast('Could not fetch listings')}
+  finally{document.getElementById('loading').classList.remove('show')}
+}
+
+function mapPropType(t){
+  t=(t||'').toUpperCase();
+  if(t.includes('SINGLE')||t.includes('SFR')||t.includes('HOUSE'))return 'sfr';
+  if(t.includes('CONDO')||t.includes('CO_OP'))return 'condo';
+  if(t.includes('TOWN'))return 'townhouse';
+  return 'other';
+}
+function getEmoji(t){return{sfr:'🏠',condo:'🏢',townhouse:'🏘',other:'🏡'}[t]||'🏠'}
+
+// FILTERS
+function filterType(t){
+  state.filterType=t;
+  document.querySelectorAll('#controls .chip').forEach(c=>c.classList.remove('active'));
+  document.getElementById('chip-'+(t==='all'?'all':t==='sfr'?'sfr':'condo'))?.classList.add('active');
+  applyFilters();
+}
+function toggleSort(){
+  state.sortBy=state.sortBy==='dist'?'price':'dist';
+  document.getElementById('chip-sort').textContent='Sort: '+(state.sortBy==='dist'?'Dist':'Price');
+  applyFilters();
+}
+function applyFilters(){
+  let list=state.allFetched.filter(p=>{
+    if(state.filterType!=='all'&&p.type!==state.filterType)return false;
+    if(state.userLat&&distMi(p.lat,p.lng,state.userLat,state.userLng)>state.radius)return false;
+    return true;
+  });
+  if(state.sortBy==='dist'&&state.userLat!=null)
+    list.sort((a,b)=>distMi(a.lat,a.lng,state.userLat,state.userLng)-distMi(b.lat,b.lng,state.userLat,state.userLng));
+  else list.sort((a,b)=>a.price-b.price);
+  state.filtered=list;
+  document.getElementById('count-pill').textContent=list.length+' nearby';
+  renderMarkers();renderCards();
+}
+
+// MARKERS
+function renderMarkers(){
+  const ids=new Set(state.filtered.map(p=>p.id));
+  for(const[id,m]of Object.entries(listingMarkers)){
+    if(!ids.has(+id)&&!ids.has(id)){map.removeLayer(m);delete listingMarkers[id]}
+  }
+  state.filtered.forEach(p=>{
+    if(listingMarkers[p.id])return;
+    const el=document.createElement('div');
+    el.className='price-pin'+(p.dom===0?' new-today':'');
+    el.textContent=fmtPrice(p.price);
+    const icon=L.divIcon({html:el,className:'',iconAnchor:[0,0]});
+    const marker=L.marker([p.lat,p.lng],{icon}).addTo(map).on('click',()=>selectListing(p.id));
+    listingMarkers[p.id]=marker;
+  });
+}
+
+// CARDS
+function renderCards(){
+  const tray=document.getElementById('tray');
+  const empty=document.getElementById('empty-state');
+  if(!state.gpsActive){
+    empty.classList.add('show');
+    empty.querySelector('span:last-child').textContent='Start GPS to see nearby homes';
+    Array.from(tray.children).forEach(c=>{if(!c.id)tray.removeChild(c)});
+    return;
+  }
+  if(!state.filtered.length){
+    empty.classList.add('show');
+    empty.querySelector('span:last-child').textContent='No listings found nearby';
+    Array.from(tray.children).forEach(c=>{if(!c.id)tray.removeChild(c)});
+    return;
+  }
+  empty.classList.remove('show');
+  tray.innerHTML='';
+  state.filtered.forEach(p=>{
+    const dist=state.userLat?distMi(p.lat,p.lng,state.userLat,state.userLng).toFixed(1):'—';
+    const isNew=p.dom===0;
+    const card=document.createElement('div');
+    card.className='card'+(p.id===state.selectedId?' selected':'');
+    card.dataset.id=p.id;
+    card.innerHTML=`
+      <div class="card-price">${fmtPrice(p.price)}</div>
+      <div class="card-addr">${p.emoji} ${p.addr}</div>
+      <div class="card-meta">${p.beds}bd · ${p.baths}ba${p.sqft?' · '+p.sqft.toLocaleString()+'sqft':''}</div>
+      <div class="card-footer">
+        <span class="card-badge${isNew?' new':''}">${isNew?'NEW TODAY':p.dom+'d listed'}</span>
+        <span class="card-dist">${dist}mi</span>
+        <button class="card-nav-btn" onclick="event.stopPropagation();navigateToProperty(${p.id})">NAV</button>
+      </div>`;
+    card.onclick=()=>selectListing(p.id);
+    tray.appendChild(card);
+  });
+}
+
+function selectListing(id){
+  state.selectedId=id;
+  const p=state.filtered.find(x=>x.id==id);
+  if(!p)return;
+  map.setView([p.lat,p.lng],15);
+  state.filtered.forEach(x=>{
+    const m=listingMarkers[x.id];
+    if(m){const el=m.getElement()?.querySelector('.price-pin');if(el)el.classList.toggle('selected',x.id==id)}
+  });
+  const card=document.querySelector(`.card[data-id="${id}"]`);
+  if(card)card.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
+}
+
+// NAVIGATION
+let geocodeTimer=null;
+document.getElementById('dest-input').addEventListener('input',function(){
+  clearTimeout(geocodeTimer);
+  const q=this.value.trim();
+  if(q.length<3){hideAC();return}
+  geocodeTimer=setTimeout(()=>geocodeSearch(q),400);
+});
+document.getElementById('dest-input').addEventListener('keydown',function(e){
+  if(e.key==='Enter'){hideAC();startNavigation()}
+  if(e.key==='Escape')hideAC();
+});
+document.addEventListener('click',e=>{if(!e.target.closest('#dest-wrap'))hideAC()});
+
+async function geocodeSearch(q){
+  try{
+    const res=await fetch(`${NOMINATIM}/search?q=${encodeURIComponent(q)}&format=json&limit=5&countrycodes=us`);
+    const results=await res.json();
+    showAC(results);
+  }catch(e){}
+}
+
+function showAC(results){
+  const ac=document.getElementById('autocomplete');
+  if(!results.length){ac.style.display='none';return}
+  ac.innerHTML=results.map(r=>`<div class="sug" onclick="selectSug(${r.lat},${r.lon},'${r.display_name.replace(/'/g,"\\'").replace(/"/g,'&quot;')}',event)">${r.display_name.substring(0,65)}${r.display_name.length>65?'…':''}</div>`).join('');
+  ac.style.display='block';
+}
+function hideAC(){document.getElementById('autocomplete').style.display='none'}
+
+function selectSug(lat,lng,label,e){
+  if(e)e.stopPropagation();
+  state.destLat=parseFloat(lat);state.destLng=parseFloat(lng);state.destLabel=label;
+  document.getElementById('dest-input').value=label.split(',').slice(0,2).join(',');
+  hideAC();
+  startNavigation();
+}
+
+async function startNavigation(){
+  const input=document.getElementById('dest-input').value.trim();
+  hideAC();
+  if(!state.userLat){toast('Start GPS first');return}
+  if(!state.destLat){
+    if(!input){toast('Enter a destination');return}
+    try{
+      const res=await fetch(`${NOMINATIM}/search?q=${encodeURIComponent(input)}&format=json&limit=1&countrycodes=us`);
+      const results=await res.json();
+      if(!results.length){toast('Address not found');return}
+      state.destLat=parseFloat(results[0].lat);state.destLng=parseFloat(results[0].lon);
+      state.destLabel=results[0].display_name;
+      document.getElementById('dest-input').value=results[0].display_name.split(',').slice(0,2).join(',');
+    }catch(e){toast('Geocode failed');return}
+  }
+  if(destMarker)map.removeLayer(destMarker);
+  destMarker=L.marker([state.destLat,state.destLng],{
+    icon:L.divIcon({html:`<div style="background:var(--warn);color:#fff;padding:3px 6px;border-radius:6px;font-family:'DM Mono',monospace;font-size:11px;font-weight:700;border:2px solid #000;white-space:nowrap">🏁 DEST</div>`,className:'',iconAnchor:[0,0]})
+  }).addTo(map);
+  await fetchRoute();
+}
+
+async function fetchRoute(){
+  if(!state.userLat||!state.destLat)return;
+  setStatus('Calculating route…');
+  try{
+    const body={coordinates:[[state.userLng,state.userLat],[state.destLng,state.destLat]]};
+    const res=await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':ORS_KEY},
+      body:JSON.stringify(body)
+    });
+    const data=await res.json();
+    if(!data.features?.length){toast('No route found');return}
+    const feature=data.features[0];
+    const summary=feature.properties.summary;
+    state.routeSteps=feature.properties.segments?.[0]?.steps||[];
+    state.currentStepIdx=0;state.navActive=true;state.route=feature;
+    if(state.routeLayer)map.removeLayer(state.routeLayer);
+    state.routeLayer=L.geoJSON(feature.geometry,{style:{color:'#00c4ff',weight:4,opacity:0.85}}).addTo(map);
+    map.fitBounds(state.routeLayer.getBounds(),{padding:[40,40]});
+    const distMiVal=(summary.distance/1000*0.621371).toFixed(1);
+    const mins=Math.round(summary.duration/60);
+    document.getElementById('route-dist').textContent='📍 '+distMiVal+'mi';
+    document.getElementById('route-eta').textContent='⏱ ~'+mins+' min';
+    document.getElementById('route-info').classList.add('show');
+    document.getElementById('nav-btn').textContent='REROUTE';
+    document.getElementById('nav-btn').classList.add('active');
+    if(state.routeSteps.length)showTurn(state.routeSteps[0]);
+    setStatus('Navigating…');
+    toast('Route: '+distMiVal+'mi · '+mins+' min');
+  }catch(e){console.error('Route error:',e);toast('Routing failed');setStatus('Route error')}
+}
+
+function cancelNavigation(){
+  state.navActive=false;state.destLat=null;state.destLng=null;
+  state.destLabel='';state.routeSteps=[];state.currentStepIdx=0;
+  if(state.routeLayer){map.removeLayer(state.routeLayer);state.routeLayer=null}
+  if(destMarker){map.removeLayer(destMarker);destMarker=null}
+  document.getElementById('route-info').classList.remove('show');
+  document.getElementById('turn-panel').classList.remove('show');
+  document.getElementById('dest-input').value='';
+  document.getElementById('nav-btn').textContent='GO';
+  document.getElementById('nav-btn').classList.remove('active');
+  setStatus(state.gpsActive?'GPS active':'Tap GPS to start');
+  toast('Navigation cancelled');
+}
+
+function updateNavProgress(lat,lng){
+  if(!state.navActive||!state.routeSteps.length)return;
+  const distToDest=distMi(lat,lng,state.destLat,state.destLng);
+  if(distToDest<0.05){toast('🎉 You have arrived!');cancelNavigation();return}
+  const remainMi=distToDest.toFixed(1);
+  const spd=state.userSpeed||13.4;
+  const etaMins=Math.round((distToDest*1609)/spd/60);
+  document.getElementById('route-dist').textContent='📍 '+remainMi+'mi remain';
+  document.getElementById('route-eta').textContent='⏱ ~'+etaMins+' min';
+  const steps=state.routeSteps;
+  for(let i=state.currentStepIdx;i<Math.min(state.currentStepIdx+3,steps.length);i++){
+    const wp=steps[i].way_points;
+    if(!wp||!state.route)continue;
+    const coord=state.route.geometry.coordinates[wp[0]];
+    if(!coord)continue;
+    const d=distMi(lat,lng,coord[1],coord[0]);
+    if(d<0.025&&i===state.currentStepIdx){
+      state.currentStepIdx=Math.min(state.currentStepIdx+1,steps.length-1);
+    }
+  }
+  showTurn(steps[state.currentStepIdx]);
+}
+
+function showTurn(step){
+  if(!step)return;
+  document.getElementById('turn-panel').classList.add('show');
+  document.getElementById('turn-instruction').textContent=step.instruction||orsType(step.type,step.name);
+  const ft=Math.round((step.distance||0)*3.28084);
+  document.getElementById('turn-dist').textContent=ft>528?'In '+(ft/5280).toFixed(1)+' mi':'In '+ft+' ft';
+}
+
+function orsType(t,name){
+  name=name||'the road';
+  const m={0:'Head on '+name,1:'Turn right onto '+name,2:'Turn left onto '+name,
+    3:'Turn slight right onto '+name,4:'Turn slight left onto '+name,
+    5:'Turn sharp right onto '+name,6:'Turn sharp left onto '+name,
+    7:'Continue on '+name,8:'Enter roundabout',9:'Exit roundabout onto '+name,
+    10:'U-turn on '+name,11:'Arrive at destination',12:'Depart'};
+  return m[t]||'Continue';
+}
+
+function navigateToProperty(id){
+  const p=state.filtered.find(x=>x.id==id);
+  if(!p)return;
+  state.destLat=p.lat;state.destLng=p.lng;state.destLabel=p.addr;
+  document.getElementById('dest-input').value=p.addr.split(',').slice(0,2).join(',');
+  startNavigation();
+}
+
+function updateRadius(val){
+  state.radius=parseInt(val);
+  document.getElementById('radius-val').textContent=val+'mi';
+  if(state.userLat)fetchListings(state.userLat,state.userLng);
+}
+
+function recenterMap(){if(state.userLat)map.setView([state.userLat,state.userLng],14)}
+
+function distMi(lat1,lng1,lat2,lng2){
+  const R=3958.8,dLat=(lat2-lat1)*Math.PI/180,dLng=(lng2-lng1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function fmtPrice(p){
+  if(p>=1e6)return '$'+(p/1e6).toFixed(2)+'M';
+  if(p>=1e3)return '$'+Math.round(p/1e3)+'K';
+  return '$'+p;
+}
+function setStatus(msg){document.getElementById('status-text').textContent=msg}
+let _tt=null;
+function toast(msg){
+  const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');
+  clearTimeout(_tt);_tt=setTimeout(()=>el.classList.remove('show'),2500);
+}
+</script>
+</body>
+</html>
