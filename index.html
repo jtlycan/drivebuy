@@ -235,32 +235,69 @@ function onPosition(pos){
 }
 
 // LISTINGS
+const RAPIDAPI_KEY='35fff46c9bmshf86bcb9af6ff82bp157c4ajsn5d0d6217e015';
+const RAPIDAPI_HOST='real-time-real-estate-data.p.rapidapi.com';
 async function fetchListings(lat,lng){
   setStatus('Fetching listings…');
   document.getElementById('loading').classList.add('show');
   state.lastFetchLat=lat;state.lastFetchLng=lng;
   try{
-    const url=`${PROXY}?location=${lat},${lng}&radius=${state.radius}&listing_type=for_sale&status=for_sale`;
-    const res=await fetch(url);
+    // Reverse geocode lat/lng to city name for the search query
+    const city=await nearestCity(lat,lng);
+    const url='https://'+RAPIDAPI_HOST+'/search?location='+encodeURIComponent(city)+'&type=for_sale&radius='+state.radius;
+    const res=await fetch(url,{headers:{'x-rapidapi-key':RAPIDAPI_KEY,'x-rapidapi-host':RAPIDAPI_HOST}});
     const data=await res.json();
-    const props=data?.data?.results||data?.data?.home_search?.results||data?.props||[];
-    state.allFetched=(Array.isArray(props)?props:[]).map((p,i)=>{
+    // API returns data as a direct array
+    const props=Array.isArray(data?.data)?data.data:Object.values(data?.data||{});
+    state.allFetched=props.map((p,i)=>{
       const type=mapPropType(p.homeType||p.propertyType||'');
-      const addr=[p.streetAddress,p.city,p.state].filter(Boolean).join(', ')||p.address||'Unknown';
+      const addr=p.address||[p.streetAddress,p.city,p.state].filter(Boolean).join(', ')||'Unknown';
+      // New API uses beds/baths/area alongside bedrooms/bathrooms/livingArea
       return{
-        id:p.zpid||p.property_id||i,
-        lat:parseFloat(p.latitude||0),lng:parseFloat(p.longitude||0),
-        price:parseInt(p.price||0),addr,sqft:parseInt(p.livingArea||0),
-        beds:parseInt(p.bedrooms||0),baths:parseFloat(p.bathrooms||0),
-        type,dom:parseInt(p.daysOnZillow||p.daysOnMarket||0),
-        emoji:getEmoji(type),url:p.detailUrl||p.hdpUrl||null
+        id:p.zpid||p.id||p.property_id||i,
+        lat:parseFloat(p.latitude||p.latLong?.latitude||0),
+        lng:parseFloat(p.longitude||p.latLong?.longitude||0),
+        price:parseInt(p.price||p.unformattedPrice||0),
+        addr,
+        sqft:parseInt(p.livingArea||p.area||0),
+        beds:parseInt(p.bedrooms||p.beds||0),
+        baths:parseFloat(p.bathrooms||p.baths||0),
+        type,
+        dom:parseInt(p.daysOnZillow||p.daysOnMarket||0),
+        emoji:getEmoji(type),
+        url:p.detailUrl||p.hdpUrl||null
       };
     }).filter(p=>p.lat&&p.lng&&p.price>0);
     applyFilters();
     setStatus(state.allFetched.length+' listings found');
     toast(state.allFetched.length+' homes within '+state.radius+'mi');
-  }catch(e){console.error(e);setStatus('Fetch failed');toast('Could not fetch listings')}
+  }catch(e){console.error(e);setStatus('Fetch failed');toast('Could not load listings')}
   finally{document.getElementById('loading').classList.remove('show')}
+}
+// Reverse geocode: find nearest city name from coordinates
+function nearestCity(lat,lng){
+  const cities=[
+    ['Aurora, CO',39.7294,-104.8319],['Denver, CO',39.7392,-104.9903],
+    ['Boulder, CO',40.0150,-105.2705],['Colorado Springs, CO',38.8339,-104.8214],
+    ['Fort Collins, CO',40.5853,-105.0844],['Lakewood, CO',39.7047,-105.0814],
+    ['Arvada, CO',39.8028,-105.0875],['Westminster, CO',39.8366,-105.0372],
+    ['Thornton, CO',39.8680,-104.9719],['Centennial, CO',39.5807,-104.8772],
+    ['Highlands Ranch, CO',39.5480,-104.9694],['Parker, CO',39.5186,-104.7613],
+    ['Phoenix, AZ',33.4484,-112.0740],['Las Vegas, NV',36.1699,-115.1398],
+    ['Los Angeles, CA',34.0522,-118.2437],['San Diego, CA',32.7157,-117.1611],
+    ['San Francisco, CA',37.7749,-122.4194],['Seattle, WA',47.6062,-122.3321],
+    ['Portland, OR',45.5051,-122.6750],['Chicago, IL',41.8781,-87.6298],
+    ['Houston, TX',29.7604,-95.3698],['Austin, TX',30.2672,-97.7431],
+    ['Dallas, TX',32.7767,-96.7970],['New York, NY',40.7128,-74.0060],
+    ['Miami, FL',25.7617,-80.1918],['Atlanta, GA',33.7490,-84.3880],
+    ['Boston, MA',42.3601,-71.0589],['Washington, DC',38.9072,-77.0369],
+  ];
+  let best=cities[0],bestD=9999;
+  for(const c of cities){
+    const d=distMi(lat,lng,c[1],c[2]);
+    if(d<bestD){bestD=d;best=c;}
+  }
+  return best[0];
 }
 
 function mapPropType(t){
