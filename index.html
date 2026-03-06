@@ -40,10 +40,14 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 #route-info.show{display:flex;gap:16px;align-items:center}
 #cancel-route{margin-left:auto;background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;color:var(--muted);font-size:11px;cursor:pointer}
 #cancel-route:hover{border-color:var(--warn);color:var(--warn)}
-#turn-panel{display:none;background:rgba(0,196,255,0.08);border-radius:8px;padding:8px 12px;flex-direction:column;gap:3px}
+#turn-panel{display:none;background:rgba(0,196,255,0.1);border:1px solid rgba(0,196,255,0.3);border-radius:10px;padding:10px 14px;flex-direction:row;gap:12px;align-items:center}
 #turn-panel.show{display:flex}
-#turn-instruction{font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500}
+#turn-arrow{font-size:26px;line-height:1;flex-shrink:0;width:32px;text-align:center}
+#turn-body{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+#turn-instruction{font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #turn-dist{font-family:'DM Mono',monospace;font-size:11px;color:var(--accent2)}
+#reroute-badge{display:none;font-size:10px;background:var(--warn);color:#000;padding:2px 6px;border-radius:4px;font-weight:700;flex-shrink:0}
+#reroute-badge.show{display:inline}
 #autocomplete{position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;z-index:200;max-height:180px;overflow-y:auto}
 #autocomplete .sug{padding:10px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border)}
 #autocomplete .sug:hover{background:var(--surface2)}
@@ -123,8 +127,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
       <button id="cancel-route" onclick="cancelNavigation()">✕ Cancel</button>
     </div>
     <div id="turn-panel">
-      <div id="turn-instruction">—</div>
-      <div id="turn-dist">—</div>
+      <div id="turn-arrow">↑</div>
+      <div id="turn-body">
+        <div id="turn-instruction">—</div>
+        <div id="turn-dist">—</div>
+      </div>
+      <span id="reroute-badge">REROUTING…</span>
     </div>
   </div>
 
@@ -418,9 +426,11 @@ async function startNavigation(){
   await fetchRoute();
 }
 
-async function fetchRoute(){
+async function fetchRoute(silent){
   if(!state.userLat||!state.destLat)return;
-  setStatus('Calculating route…');
+  if(!silent)setStatus('Calculating route…');
+  const rerouteEl=document.getElementById('reroute-badge');
+  if(rerouteEl)rerouteEl.classList.add('show');
   try{
     const body={coordinates:[[state.userLng,state.userLat],[state.destLng,state.destLat]]};
     const res=await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson',{
@@ -435,8 +445,8 @@ async function fetchRoute(){
     state.routeSteps=feature.properties.segments?.[0]?.steps||[];
     state.currentStepIdx=0;state.navActive=true;state.route=feature;
     if(state.routeLayer)map.removeLayer(state.routeLayer);
-    state.routeLayer=L.geoJSON(feature.geometry,{style:{color:'#00c4ff',weight:4,opacity:0.85}}).addTo(map);
-    map.fitBounds(state.routeLayer.getBounds(),{padding:[40,40]});
+    state.routeLayer=L.geoJSON(feature.geometry,{style:{color:'#00c4ff',weight:5,opacity:0.9}}).addTo(map);
+    if(!silent)map.fitBounds(state.routeLayer.getBounds(),{padding:[40,40]});
     const distMiVal=(summary.distance/1000*0.621371).toFixed(1);
     const mins=Math.round(summary.duration/60);
     document.getElementById('route-dist').textContent='📍 '+distMiVal+'mi';
@@ -446,12 +456,13 @@ async function fetchRoute(){
     document.getElementById('nav-btn').classList.add('active');
     if(state.routeSteps.length)showTurn(state.routeSteps[0]);
     setStatus('Navigating…');
-    toast('Route: '+distMiVal+'mi · '+mins+' min');
+    if(!silent)toast('Route: '+distMiVal+'mi · '+mins+' min');
   }catch(e){console.error('Route error:',e);toast('Routing failed');setStatus('Route error')}
+  finally{if(rerouteEl)rerouteEl.classList.remove('show');}
 }
 
 function cancelNavigation(){
-  state.navActive=false;state.destLat=null;state.destLng=null;
+  state.navActive=false;if(state.rerouteTimer){clearTimeout(state.rerouteTimer);state.rerouteTimer=null;}state.destLat=null;state.destLng=null;
   state.destLabel='';state.routeSteps=[];state.currentStepIdx=0;
   if(state.routeLayer){map.removeLayer(state.routeLayer);state.routeLayer=null}
   if(destMarker){map.removeLayer(destMarker);destMarker=null}
@@ -464,14 +475,41 @@ function cancelNavigation(){
   toast('Navigation cancelled');
 }
 
+function distToRouteM(lat,lng){
+  if(!state.route)return 9999;
+  const coords=state.route.geometry.coordinates;
+  let minD=9999;
+  for(let i=0;i<coords.length-1;i++){
+    const ax=coords[i][0],ay=coords[i][1],bx=coords[i+1][0],by=coords[i+1][1];
+    const dx=bx-ax,dy=by-ay,len2=dx*dx+dy*dy;
+    if(len2===0)continue;
+    const t=Math.max(0,Math.min(1,((lng-ax)*dx+(lat-ay)*dy)/len2));
+    const d=distMi(lat,lng,ay+t*dy,ax+t*dx)*1609;
+    if(d<minD)minD=d;
+  }
+  return minD;
+}
 function updateNavProgress(lat,lng){
   if(!state.navActive||!state.routeSteps.length)return;
   const distToDest=distMi(lat,lng,state.destLat,state.destLng);
   if(distToDest<0.05){toast('🎉 You have arrived!');cancelNavigation();return}
+  // Auto-reroute if >250ft (~76m) off route for 4+ seconds
+  const offRouteM=distToRouteM(lat,lng);
+  if(offRouteM>76&&!state.rerouteTimer){
+    state.rerouteTimer=setTimeout(()=>{
+      state.rerouteTimer=null;
+      if(state.navActive&&distToRouteM(state.userLat||lat,state.userLng||lng)>76){
+        toast('Off route — recalculating…');
+        fetchRoute(true);
+      }
+    },4000);
+  } else if(offRouteM<=76&&state.rerouteTimer){
+    clearTimeout(state.rerouteTimer);state.rerouteTimer=null;
+  }
   const remainMi=distToDest.toFixed(1);
   const spd=state.userSpeed||13.4;
   const etaMins=Math.round((distToDest*1609)/spd/60);
-  document.getElementById('route-dist').textContent='📍 '+remainMi+'mi remain';
+  document.getElementById('route-dist').textContent='📍 '+remainMi+'mi';
   document.getElementById('route-eta').textContent='⏱ ~'+etaMins+' min';
   const steps=state.routeSteps;
   for(let i=state.currentStepIdx;i<Math.min(state.currentStepIdx+3,steps.length);i++){
@@ -480,19 +518,30 @@ function updateNavProgress(lat,lng){
     const coord=state.route.geometry.coordinates[wp[0]];
     if(!coord)continue;
     const d=distMi(lat,lng,coord[1],coord[0]);
-    if(d<0.025&&i===state.currentStepIdx){
+    if(d<0.03&&i===state.currentStepIdx){
       state.currentStepIdx=Math.min(state.currentStepIdx+1,steps.length-1);
     }
   }
   showTurn(steps[state.currentStepIdx]);
 }
 
+function turnArrow(type){
+  const m={0:'↑',1:'↱',2:'↰',3:'↗',4:'↖',5:'⤵',6:'⤴',7:'↑',8:'⟳',9:'↗',10:'↩',11:'🏁',12:'↑'};
+  return m[type]||'↑';
+}
 function showTurn(step){
   if(!step)return;
   document.getElementById('turn-panel').classList.add('show');
+  document.getElementById('turn-arrow').textContent=turnArrow(step.type);
   document.getElementById('turn-instruction').textContent=step.instruction||orsType(step.type,step.name);
   const ft=Math.round((step.distance||0)*3.28084);
-  document.getElementById('turn-dist').textContent=ft>528?'In '+(ft/5280).toFixed(1)+' mi':'In '+ft+' ft';
+  if(ft<20){
+    document.getElementById('turn-dist').textContent='Turn now';
+  } else if(ft<5280){
+    document.getElementById('turn-dist').textContent='In '+ft+' ft';
+  } else {
+    document.getElementById('turn-dist').textContent='In '+(ft/5280).toFixed(1)+' mi';
+  }
 }
 
 function orsType(t,name){
