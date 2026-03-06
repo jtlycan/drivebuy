@@ -99,6 +99,24 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
 
 #toast{position:fixed;bottom:170px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 16px;font-family:'DM Mono',monospace;font-size:11px;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:3000;max-width:280px;text-align:center}
 #toast.show{opacity:1}
+
+#prop-modal{display:none;position:fixed;bottom:0;left:0;right:0;z-index:3000;background:var(--surface);border-top:2px solid var(--border);border-radius:16px 16px 0 0;padding:0;max-height:70vh;overflow-y:auto;transition:transform 0.3s ease;transform:translateY(100%)}
+#prop-modal.show{display:block;transform:translateY(0)}
+#prop-modal-handle{width:36px;height:4px;background:var(--border);border-radius:2px;margin:12px auto 0}
+#prop-modal-img{width:100%;height:180px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:64px}
+#prop-modal-img img{width:100%;height:180px;object-fit:cover;display:block}
+#prop-modal-body{padding:14px 16px 24px}
+#prop-modal-price{font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:var(--accent);line-height:1}
+#prop-modal-addr{font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);margin:4px 0 10px;line-height:1.4}
+#prop-modal-stats{display:flex;gap:16px;font-family:'DM Mono',monospace;font-size:12px;margin-bottom:12px;flex-wrap:wrap}
+#prop-modal-stats span{color:var(--text)}
+#prop-modal-badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;margin-bottom:14px}
+#prop-modal-badge.new{background:var(--accent);color:#000}
+#prop-modal-badge.old{background:var(--surface2);color:var(--muted)}
+#prop-modal-actions{display:flex;gap:10px}
+#prop-modal-nav{flex:1;background:var(--accent2);color:#000;border:none;border-radius:8px;padding:12px;font-family:'Syne',sans-serif;font-size:14px;font-weight:700;cursor:pointer}
+#prop-modal-zillow{flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:'Syne',sans-serif;font-size:14px;font-weight:700;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;gap:6px}
+#prop-modal-close{position:absolute;top:12px;right:16px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:4px;line-height:1}
 </style>
 </head>
 <body>
@@ -390,14 +408,7 @@ function renderCards(){
 }
 
 function selectListing(id){
-  state.selectedId=id;
-  const p=state.filtered.find(x=>x.id==id);
-  if(!p)return;
-  map.setView([p.lat,p.lng],15);
-  state.filtered.forEach(x=>{
-    const m=listingMarkers[x.id];
-    if(m){const el=m.getElement()?.querySelector('.price-pin');if(el)el.classList.toggle('selected',x.id==id)}
-  });
+  openCard(id);
   const card=document.querySelector(`.card[data-id="${id}"]`);
   if(card)card.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
 }
@@ -653,6 +664,58 @@ function toast(msg){
   const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');
   clearTimeout(_tt);_tt=setTimeout(()=>el.classList.remove('show'),2500);
 }
+
+function openCard(id){
+  const p=state.filtered.find(x=>x.id==id);
+  if(!p)return;
+  state.selectedId=id;
+  document.getElementById('prop-modal-price').textContent=fmtPrice(p.price);
+  document.getElementById('prop-modal-addr').textContent=p.addr;
+  document.getElementById('pm-beds').textContent=p.beds||'?';
+  document.getElementById('pm-baths').textContent=p.baths||'?';
+  document.getElementById('pm-sqft').textContent=p.sqft?p.sqft.toLocaleString():'?';
+  const dist=state.userLat?distMi(p.lat,p.lng,state.userLat,state.userLng).toFixed(1):'?';
+  document.getElementById('pm-dist').textContent=dist;
+  const badge=document.getElementById('prop-modal-badge');
+  if(p.dom===0){badge.textContent='NEW TODAY';badge.className='new';}
+  else{badge.textContent=p.dom+' days on market';badge.className='old';}
+  document.getElementById('prop-modal-emoji').textContent=p.emoji||'?';
+  const zEl=document.getElementById('prop-modal-zillow');
+  if(p.url){zEl.href='https://www.zillow.com'+p.url;zEl.style.opacity='1';zEl.style.pointerEvents='';}
+  else{zEl.href='#';zEl.style.opacity='0.4';zEl.style.pointerEvents='none';}
+  document.getElementById('prop-modal').classList.add('show');
+  map.setView([p.lat,p.lng],16);
+  state.filtered.forEach(x=>{
+    const m=listingMarkers[x.id];
+    if(m){const el=m.getElement()?.querySelector('.price-pin');if(el)el.classList.toggle('selected',x.id==id);}
+  });
+}
+function closeCard(){document.getElementById('prop-modal').classList.remove('show');}
+function navFromCard(){
+  const p=state.filtered.find(x=>x.id==state.selectedId);
+  if(p){closeCard();navigateToProperty(p.id);}
+}
 </script>
+
+  <div id="prop-modal">
+    <div id="prop-modal-handle"></div>
+    <button id="prop-modal-close" onclick="closeCard()">&#x2715;</button>
+    <div id="prop-modal-img"><span id="prop-modal-emoji">&#x1F3E0;</span></div>
+    <div id="prop-modal-body">
+      <div id="prop-modal-price">&#x2014;</div>
+      <div id="prop-modal-addr">&#x2014;</div>
+      <div id="prop-modal-stats">
+        <div>&#x1F6CF; <span id="pm-beds">&#x2014;</span> bd</div>
+        <div>&#x1F6BF; <span id="pm-baths">&#x2014;</span> ba</div>
+        <div>&#x1F4D0; <span id="pm-sqft">&#x2014;</span> sqft</div>
+        <div>&#x1F4CD; <span id="pm-dist">&#x2014;</span> mi away</div>
+      </div>
+      <div id="prop-modal-badge">&#x2014;</div>
+      <div id="prop-modal-actions">
+        <button id="prop-modal-nav" onclick="navFromCard()">Navigate Here</button>
+        <a id="prop-modal-zillow" href="#" target="_blank">View on Zillow</a>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
