@@ -11,8 +11,8 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
-  --bg:#0a0a0a;--surface:#141414;--surface2:#1e1e1e;--border:#2a2a2a;
-  --accent:#00ff87;--accent2:#00c4ff;--warn:#ff6b35;--text:#f0f0f0;--muted:#666;
+  --bg:#1a1208;--surface:#2a1f0e;--surface2:#3a2c18;--border:#5a3e22;
+  --accent:#e8920a;--accent2:#c0392b;--warn:#f39c12;--text:#f5e6c8;--muted:#8a7055;
 }
 html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif}
 #app{display:flex;flex-direction:column;height:100vh}
@@ -40,7 +40,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 #route-info.show{display:flex;gap:16px;align-items:center}
 #cancel-route{margin-left:auto;background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;color:var(--muted);font-size:11px;cursor:pointer}
 #cancel-route:hover{border-color:var(--warn);color:var(--warn)}
-#turn-panel{display:none;background:rgba(0,196,255,0.1);border:1px solid rgba(0,196,255,0.3);border-radius:10px;padding:10px 14px;flex-direction:row;gap:12px;align-items:center}
+#turn-panel{display:none;background:rgba(232,146,10,0.1);border:1px solid rgba(232,146,10,0.3);border-radius:10px;padding:10px 14px;flex-direction:row;gap:12px;align-items:center}
 #turn-panel.show{display:flex}
 #turn-arrow{font-size:26px;line-height:1;flex-shrink:0;width:32px;text-align:center}
 #turn-body{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
@@ -239,7 +239,7 @@ function onPosition(pos){
     document.getElementById('speed-display').textContent=mph+' mph';
   }
   if(!userMarker){
-    userMarker=L.circleMarker([lat,lng],{radius:8,color:'#00ff87',fillColor:'#00ff87',fillOpacity:0.9,weight:2}).addTo(map);
+    userMarker=L.circleMarker([lat,lng],{radius:8,color:'#e8920a',fillColor:'#e8920a',fillOpacity:0.9,weight:2}).addTo(map);
     map.setView([lat,lng],14);
     ['chip-all','chip-sfr','chip-condo','chip-sort'].forEach(id=>document.getElementById(id).style.display='');
     document.getElementById('radius-wrap').style.display='';
@@ -492,7 +492,7 @@ async function fetchRoute(silent){
     state.currentStepIdx=0;state.navActive=true;
     state.route={geometry:route.geometry};
     if(state.routeLayer)map.removeLayer(state.routeLayer);
-    state.routeLayer=L.geoJSON(route.geometry,{style:{color:'#00c4ff',weight:5,opacity:0.9}}).addTo(map);
+    state.routeLayer=L.geoJSON(route.geometry,{style:{color:'#e8920a',weight:5,opacity:0.9}}).addTo(map);
     if(!silent)map.fitBounds(state.routeLayer.getBounds(),{padding:[40,40]});
     const distMiVal=(route.distance*0.000621371).toFixed(1);
     const mins=Math.round(route.duration/60);
