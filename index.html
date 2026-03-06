@@ -432,23 +432,23 @@ async function fetchRoute(silent){
   const rerouteEl=document.getElementById('reroute-badge');
   if(rerouteEl)rerouteEl.classList.add('show');
   try{
-    const body={coordinates:[[state.userLng,state.userLat],[state.destLng,state.destLat]]};
-    const res=await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':ORS_KEY},
-      body:JSON.stringify(body)
-    });
+    const url='https://router.project-osrm.org/route/v1/driving/'+state.userLng+','+state.userLat+';'+state.destLng+','+state.destLat+'?overview=full&geometries=geojson&steps=true';
+    const res=await fetch(url);
     const data=await res.json();
-    if(!data.features?.length){toast('No route found');return}
-    const feature=data.features[0];
-    const summary=feature.properties.summary;
-    state.routeSteps=feature.properties.segments?.[0]?.steps||[];
-    state.currentStepIdx=0;state.navActive=true;state.route=feature;
+    if(data.code!=='Ok'||!data.routes?.length){toast('No route found');return}
+    const route=data.routes[0];
+    const leg=route.legs[0];
+    state.routeSteps=(leg.steps||[]).map(s=>{
+      const m=s.maneuver||{};
+      return {instruction:osrmInstruction(m.type,m.modifier,s.name),distance:s.distance,type:osrmType(m.type,m.modifier),coord:m.location};
+    });
+    state.currentStepIdx=0;state.navActive=true;
+    state.route={geometry:route.geometry};
     if(state.routeLayer)map.removeLayer(state.routeLayer);
-    state.routeLayer=L.geoJSON(feature.geometry,{style:{color:'#00c4ff',weight:5,opacity:0.9}}).addTo(map);
+    state.routeLayer=L.geoJSON(route.geometry,{style:{color:'#00c4ff',weight:5,opacity:0.9}}).addTo(map);
     if(!silent)map.fitBounds(state.routeLayer.getBounds(),{padding:[40,40]});
-    const distMiVal=(summary.distance/1000*0.621371).toFixed(1);
-    const mins=Math.round(summary.duration/60);
+    const distMiVal=(route.distance*0.000621371).toFixed(1);
+    const mins=Math.round(route.duration/60);
     document.getElementById('route-dist').textContent='📍 '+distMiVal+'mi';
     document.getElementById('route-eta').textContent='⏱ ~'+mins+' min';
     document.getElementById('route-info').classList.add('show');
@@ -459,6 +459,33 @@ async function fetchRoute(silent){
     if(!silent)toast('Route: '+distMiVal+'mi · '+mins+' min');
   }catch(e){console.error('Route error:',e);toast('Routing failed');setStatus('Route error')}
   finally{if(rerouteEl)rerouteEl.classList.remove('show');}
+}
+function osrmType(type,mod){
+  if(type==='arrive')return 11;
+  if(type==='depart')return 0;
+  if(type==='turn'){
+    if(mod==='right')return 1;if(mod==='left')return 2;
+    if(mod==='slight right')return 3;if(mod==='slight left')return 4;
+    if(mod==='sharp right')return 5;if(mod==='sharp left')return 6;
+    if(mod==='uturn')return 10;
+  }
+  if(type==='continue'||type==='new name')return 7;
+  if(type==='roundabout'||type==='rotary')return 8;
+  if(type==='exit roundabout'||type==='exit rotary')return 9;
+  return 0;
+}
+function osrmInstruction(type,mod,name){
+  const rd=name&&name!==''?name:'the road';
+  if(type==='depart')return 'Head on '+rd;
+  if(type==='arrive')return 'Arrive at destination';
+  if(type==='turn'){const m={right:'Turn right',left:'Turn left','slight right':'Bear right','slight left':'Bear left','sharp right':'Sharp right','sharp left':'Sharp left',uturn:'Make a U-turn',straight:'Continue straight'};return (m[mod]||'Continue')+' onto '+rd;}
+  if(type==='continue'||type==='new name')return 'Continue on '+rd;
+  if(type==='roundabout'||type==='rotary')return 'Enter roundabout';
+  if(type==='exit roundabout'||type==='exit rotary')return 'Exit onto '+rd;
+  if(type==='merge')return 'Merge onto '+rd;
+  if(type==='on ramp')return 'Take ramp onto '+rd;
+  if(type==='off ramp')return 'Take exit onto '+rd;
+  return 'Continue on '+rd;
 }
 
 function cancelNavigation(){
@@ -513,9 +540,7 @@ function updateNavProgress(lat,lng){
   document.getElementById('route-eta').textContent='⏱ ~'+etaMins+' min';
   const steps=state.routeSteps;
   for(let i=state.currentStepIdx;i<Math.min(state.currentStepIdx+3,steps.length);i++){
-    const wp=steps[i].way_points;
-    if(!wp||!state.route)continue;
-    const coord=state.route.geometry.coordinates[wp[0]];
+    const coord=steps[i].coord; // [lng,lat] from OSRM maneuver location
     if(!coord)continue;
     const d=distMi(lat,lng,coord[1],coord[0]);
     if(d<0.03&&i===state.currentStepIdx){
